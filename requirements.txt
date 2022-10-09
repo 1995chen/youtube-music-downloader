@@ -16,3 +16,4 @@ urllib3
 musicbrainzngs
 ytmusicapi
 spotipy
+opencc-python-reimplemented==0.1.6

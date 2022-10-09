@@ -12,6 +12,7 @@ import requests
 import itunespy
 import yt_dlp
 import ffmpeg
+from opencc import OpenCC
 from ytmusicapi import YTMusic
 from mutagen.id3 import (
     ID3,
@@ -51,6 +52,7 @@ console_handler.setFormatter(formatter)
 # 添加两个Handler
 root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__)
+opencc = OpenCC('t2s')
 
 play_list = "https://music.youtube.com/playlist?list=PLZAE9aF6H86HZUSFf30crtLm22UiaoVrX"
 dest_dir = "C:/tmp"
@@ -216,18 +218,20 @@ def search(url) -> Union[str, str]:
     return url, str(data[0]["title"])
 
 
-def download(link, song_name) -> str:
+def download(link, _song_name) -> str:
     """Download the song by using the passed link.
 
     The song will be saved with the passed title.
     Return the saved path of the song.
     """
     # If song_name doesn't have mp3 extension, add it
-    if not song_name.endswith("mp3"):
-        song_name += '.' + "mp3"
+    if not _song_name.endswith("mp3"):
+        _song_name += '.' + "mp3"
 
     # Replace the spaces with hashes
-    song_name = re.sub(r" |/", "#", song_name)
+    _song_name = re.sub(r" |/", "#", _song_name)
+    # 繁体字转换为简体
+    _song_name = opencc.convert(_song_name)
 
     # The directory where we will download to.
     dw_dir = os.path.join(TMP_PATH, 'music')
@@ -237,7 +241,7 @@ def download(link, song_name) -> str:
         os.makedirs(dw_dir)
 
     # Name of the temp file
-    _path = os.path.join(dw_dir, song_name)
+    _path = os.path.join(dw_dir, _song_name)
     logger.debug(_path)
 
     # Start downloading the song
@@ -511,30 +515,40 @@ def search_song(q="Tera Buzz"):
 
     # Add the unsorted data
     to_be_sorted += rest
+    # TODO 这里可能要对artist name、provider进行排序
 
     return to_be_sorted
 
 
-def meta(conv_name: str, song_name: str, song_metadata: str):
+def meta(_song_path: str, song_name: str, song_metadata: str):
     """Handle adding the metadata for the passed song.
 
     We will use the passed name to search for metadata, ask
     the user for a choice and accordingly add the meta to
     the song.
     """
+    # 简体歌名
+    simplified_name = opencc.convert(song_name)
     # Else add metadata in ordinary way
     logger.info('Getting song data for {}...'.format(song_name))
     track_info = search_song(song_name)
+    if track_info is None and simplified_name != song_name:
+        logger.info('Getting song data for {}...'.format(simplified_name))
+        track_info = search_song(simplified_name)
     if track_info is None:
         logger.info('Getting song data for {}...'.format(song_metadata))
         track_info = search_song(song_metadata)
+    simplified_meta = opencc.convert(song_metadata)
+    if track_info is None and simplified_meta != song_metadata:
+        logger.info('Getting song data for {}...'.format(simplified_meta))
+        track_info = search_song(simplified_meta)
     if track_info is None:
         logger.info(f"can not found metadata for song: {song_name}")
         return
     logger.info('Setting data...')
     setData(
         track_info,
-        conv_name,
+        _song_path,
     )
 
 
@@ -555,9 +569,9 @@ def post_processing(
     Convert, Trim, Metadata, Cleaning up.
     """
     logger.debug("song_name: ", song_name, " song_meta: ", song_metadata)
-    conv_name = convert_to_mp3(path)
+    conv_path = convert_to_mp3(path)
 
-    extension = os.path.basename(conv_name).split(".")[-1]
+    extension = os.path.basename(conv_path).split(".")[-1]
     logger.debug("ext: {}".format(extension))
 
     new_basename = "{}.{}".format(song_name, extension)
@@ -567,8 +581,8 @@ def post_processing(
     # Create the destination file name
     dest_filename = os.path.join(
         dest_dir, re.sub(r'/', '-', new_basename))
-    meta(conv_name, song_name, song_metadata)
-    shutil.move(conv_name, dest_filename)
+    meta(conv_path, song_name, song_metadata)
+    shutil.move(conv_path, dest_filename)
 
     logger.info('Moved to {}...'.format(dest_dir))
     # Delete the cached songs
@@ -602,6 +616,7 @@ if __name__ == '__main__':
             )
             url = song["url"]
             song_name = get_title(url)
+            logger.info(f"prepare to download {song_name}!", exc_info=True)
             link, yt_title = search(url=url)
             # Check if this song is supposed to be skipped.
             if not link:
@@ -618,4 +633,4 @@ if __name__ == '__main__':
                 path,
             )
         except Exception:
-            logger.info(f"failed to downloading {song_name}", exc_info=True)
+            logger.error(f"failed to download!", exc_info=True)
